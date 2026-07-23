@@ -17,7 +17,9 @@ import (
 	"time"
 
 	netbird "github.com/netbirdio/netbird/client/embed"
+	mgm "github.com/netbirdio/netbird/shared/management/client"
 	"github.com/pires/go-proxyproto"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 func main() {
@@ -111,6 +113,18 @@ func main() {
 	if err := listener.Close(); err != nil {
 		log.Printf("Error closing listener: %v", err)
 	}
+
+	// Deregister from Management so the peer (and its DNS label + routes) is
+	// removed immediately, rather than lingering until Management's ephemeral
+	// cleanup (~10m offline). Best-effort: on failure we fall back to that
+	// cleanup, so this never blocks shutdown beyond its short timeout.
+	deregisterCtx, deregisterCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := deregisterPeer(deregisterCtx, client); err != nil {
+		log.Printf("Peer deregistration failed (falling back to management ephemeral cleanup): %v", err)
+	} else {
+		log.Println("Deregistered peer from management")
+	}
+	deregisterCancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
@@ -384,6 +398,35 @@ func handleConnection(src net.Conn, targetAddr string, sendProxyHeader bool) {
 	// the backend (database) connection.
 	<-done
 	log.Printf("Connection from %s closed", src.RemoteAddr())
+}
+
+// deregisterPeer deletes this peer from Management via the peer-authenticated
+// Logout RPC (Management runs DeletePeer), so the peer is removed at once
+// instead of waiting out the ~10m ephemeral offline cleanup. It reuses the
+// client's own credentials (private key + management URL) over a fresh
+// connection, so no API token is needed. Requires the setup key to be reusable
+// so the next pod can re-register.
+func deregisterPeer(ctx context.Context, client *netbird.Client) error {
+	cfg, err := client.GetConfig()
+	if err != nil {
+		return fmt.Errorf("get config: %w", err)
+	}
+	if cfg.ManagementURL == nil {
+		return errors.New("no management URL in config")
+	}
+
+	key, err := wgtypes.ParseKey(cfg.PrivateKey)
+	if err != nil {
+		return fmt.Errorf("parse private key: %w", err)
+	}
+
+	mgmClient, err := mgm.NewClient(ctx, cfg.ManagementURL.Host, key, cfg.ManagementURL.Scheme == "https")
+	if err != nil {
+		return fmt.Errorf("connect to management: %w", err)
+	}
+	defer func() { _ = mgmClient.Close() }()
+
+	return mgmClient.Logout()
 }
 
 // waitReady blocks until the management connection is up or the timeout elapses.

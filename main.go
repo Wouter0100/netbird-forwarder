@@ -156,22 +156,31 @@ func (h *health) downFor(now time.Time) (time.Duration, string) {
 	return now.Sub(h.unhealthySince), h.reason
 }
 
-// evaluateHealth inspects the NetBird client. It returns unhealthy only for
-// unambiguous failures, so an idle peer with no clients is never flagged:
-//   - Status() error (engine gone),
-//   - management AND signal both disconnected (control plane lost),
-//   - a peer the recorder reports as Connected but whose WireGuard tunnel has
-//     had no handshake within handshakeStale (a wedged data path where the peer
-//     stays up but stops forwarding; a genuinely offline client is not
-//     Connected, so it does not trip this).
-func evaluateHealth(client *netbird.Client, handshakeStale time.Duration) (bool, string) {
+// evaluateHealth inspects the NetBird client and classifies its state:
+//
+//   - terminal=true: the embedded engine has stopped for good. NetBird exits its
+//     connection retry loop on unrecoverable errors (e.g. the peer was
+//     deregistered -> PermissionDenied, connect.go returns backoff.Permanent),
+//     which clears the engine and it never comes back in-process. The watchdog
+//     exits straight away rather than waiting out the grace window.
+//   - ok=false (recoverable/degraded): management+signal both disconnected, or a
+//     connected peer with a stale WireGuard tunnel. Subject to the grace window,
+//     since these can be transient.
+//
+// It flags unhealthy only for unambiguous failures, so an idle peer with no
+// clients is never flagged.
+func evaluateHealth(client *netbird.Client, handshakeStale time.Duration) (ok bool, terminal bool, reason string) {
+	if stopped, err := engineStopped(client); stopped {
+		return false, true, "NetBird engine stopped (" + err.Error() + ")"
+	}
+
 	st, err := client.Status()
 	if err != nil {
-		return false, "status error: " + err.Error()
+		return false, false, "status error: " + err.Error()
 	}
 
 	if !st.ManagementState.Connected && !st.SignalState.Connected {
-		return false, "management and signal both disconnected"
+		return false, false, "management and signal both disconnected"
 	}
 
 	if handshakeStale > 0 {
@@ -188,12 +197,37 @@ func evaluateHealth(client *netbird.Client, handshakeStale time.Duration) (bool,
 				if name == "" {
 					name = p.PubKey
 				}
-				return false, fmt.Sprintf("peer %s reported connected but last WireGuard handshake %s", name, last)
+				return false, false, fmt.Sprintf("peer %s reported connected but last WireGuard handshake %s", name, last)
 			}
 		}
 	}
 
-	return true, "ok"
+	return true, false, "ok"
+}
+
+// engineStopped reports whether the embedded NetBird engine is gone. Status()
+// never errors and returns stale data after a stop, so probe a getEngine-backed
+// call instead: it returns ErrEngineNotStarted / ErrClientNotStarted exactly
+// when the engine goroutine has exited. The returned error carries the reason.
+func engineStopped(client *netbird.Client) (bool, error) {
+	_, err := client.GetLatestSyncResponse()
+	if errors.Is(err, netbird.ErrEngineNotStarted) || errors.Is(err, netbird.ErrClientNotStarted) {
+		return true, err
+	}
+	return false, nil
+}
+
+// confirmEngineStopped re-probes a few times so a brief engine restart (the
+// engine is momentarily nil between reconnect attempts) is not mistaken for a
+// terminal stop. Returns true only if the engine stays gone throughout.
+func confirmEngineStopped(client *netbird.Client) bool {
+	for i := 0; i < 3; i++ {
+		time.Sleep(2 * time.Second)
+		if stopped, _ := engineStopped(client); !stopped {
+			return false
+		}
+	}
+	return true
 }
 
 // runWatchdog re-evaluates health on a ticker. After sustained failure past
@@ -210,7 +244,15 @@ func runWatchdog(ctx context.Context, client *netbird.Client, h *health, listene
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ok, reason := evaluateHealth(client, handshakeStale)
+			ok, terminal, reason := evaluateHealth(client, handshakeStale)
+
+			// Terminal states will not recover in-process, so skip the grace
+			// window and exit as soon as a quick re-check confirms it.
+			if terminal && confirmEngineStopped(client) {
+				log.Printf("watchdog: %s; not recoverable in-process, exiting immediately to trigger pod recreation", reason)
+				os.Exit(1)
+			}
+
 			if listenerBroken.Load() {
 				ok, reason = false, "accept loop persistently failing"
 			}

@@ -30,5 +30,10 @@ Health is considered failing only on unambiguous conditions: the client status
 call errors, management and signal are both disconnected, a connected peer's
 WireGuard tunnel is stale, or the accept loop is persistently failing.
 
+If the embedded NetBird engine stops for good (e.g. the peer was deregistered
+and NetBird gives up its connection retry loop), that is not recoverable in
+this process, so the watchdog exits immediately (after a brief re-check) rather
+than waiting out `WATCHDOG_GRACE`.
+
 ## Container image
 A container image is available in this repository.

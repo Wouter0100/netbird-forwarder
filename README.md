@@ -35,5 +35,11 @@ and NetBird gives up its connection retry loop), that is not recoverable in
 this process, so the watchdog exits immediately (after a brief re-check) rather
 than waiting out `WATCHDOG_GRACE`.
 
+On graceful shutdown the peer deregisters itself from Management (the peer's own
+`Logout` RPC, which deletes it) so its DNS label and routes are freed at once,
+instead of lingering until Management's ~10 minute ephemeral offline cleanup.
+This is best-effort with a short timeout and requires a reusable setup key; on
+failure it falls back to that cleanup.
+
 ## Container image
 A container image is available in this repository.

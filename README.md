@@ -17,18 +17,29 @@ endpoint to a Kubernetes `livenessProbe`.
 
 - `HEALTH_LISTEN_PORT`: Pod-local port for the `/healthz` endpoint (default `8081`).
   Not exposed on the NetBird network.
-- `HEALTH_HANDSHAKE_STALE`: A peer reported as connected but with no WireGuard
-  handshake within this window is treated as a dead tunnel (default `5m`, Go
-  duration). Set `0` to disable this check. Peers that are simply offline are not
-  connected, so they never trip it.
 - `WATCHDOG_INTERVAL`: How often health is re-evaluated (default `30s`).
 - `WATCHDOG_GRACE`: How long the peer must be continuously unhealthy before
   `/healthz` returns 500 and the watchdog exits the process to trigger a pod
   recreation (default `3m`). This hysteresis absorbs transient management blips.
 
-Health is considered failing only on unambiguous conditions: the client status
-call errors, management and signal are both disconnected, a connected peer's
-WireGuard tunnel is stale, or the accept loop is persistently failing.
+Every 30s the watchdog also dials its own proxy port over the NetBird network
+and expects to be accepted. This is the check that needs no remote device to be
+awake, and it tests the wedge directly: `Dial` resolves the engine's current
+netstack while the listener stays bound to the netstack it was created on, so
+once the engine rebuilds its net the listener is orphaned and clients are refused
+on a port this process still believes it is serving. A listener that has quietly
+closed fails the same probe. The probe is served by the accept loop and never
+reaches the target, and it is used only after it has succeeded once at startup;
+if it cannot, that is logged and liveness carries on without it.
+
+Health is considered failing only on unambiguous conditions, and only on
+conditions about this peer itself: the client status call errors, management and
+signal are both disconnected, the self-probe is refused, or the accept loop is
+persistently failing. Remote
+peer state is deliberately not consulted. A device reported as connected may sit
+for hours with no WireGuard handshake, because with lazy connections that is what
+an idle or sleeping laptop looks like, and recreating this pod cannot repair
+somebody else's tunnel anyway.
 
 If the embedded NetBird engine stops for good (e.g. the peer was deregistered
 and NetBird gives up its connection retry loop), that is not recoverable in

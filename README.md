@@ -22,9 +22,20 @@ endpoint to a Kubernetes `livenessProbe`.
   `/healthz` returns 500 and the watchdog exits the process to trigger a pod
   recreation (default `3m`). This hysteresis absorbs transient management blips.
 
+Every 30s the watchdog also dials its own proxy port over the NetBird network
+and expects to be accepted. This is the check that needs no remote device to be
+awake, and it tests the wedge directly: `Dial` resolves the engine's current
+netstack while the listener stays bound to the netstack it was created on, so
+once the engine rebuilds its net the listener is orphaned and clients are refused
+on a port this process still believes it is serving. A listener that has quietly
+closed fails the same probe. The probe is served by the accept loop and never
+reaches the target, and it is used only after it has succeeded once at startup;
+if it cannot, that is logged and liveness carries on without it.
+
 Health is considered failing only on unambiguous conditions, and only on
 conditions about this peer itself: the client status call errors, management and
-signal are both disconnected, or the accept loop is persistently failing. Remote
+signal are both disconnected, the self-probe is refused, or the accept loop is
+persistently failing. Remote
 peer state is deliberately not consulted. A device reported as connected may sit
 for hours with no WireGuard handshake, because with lazy connections that is what
 an idle or sleeping laptop looks like, and recreating this pod cannot repair

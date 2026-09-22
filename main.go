@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -88,14 +89,22 @@ func main() {
 	var listenerBroken atomic.Bool
 	h := &health{healthy: true}
 
+	// Accept connections until the listener is closed. Started before the
+	// watchdog so that the self-probe below is served.
+	done := make(chan struct{})
+	go acceptLoop(listener, targetAddr, useProxyProto, addrHost(listener.Addr()), &listenerBroken, done)
+
+	opts := watchdogOpts{
+		interval:   watchdogInterval,
+		grace:      watchdogGrace,
+		listenPort: listenPort,
+		selfProbe:  verifySelfProbe(client, listenPort, 10*time.Second),
+	}
+
 	watchdogCtx, watchdogCancel := context.WithCancel(context.Background())
 	healthSrv := startHealthServer(healthAddr, h, watchdogGrace)
-	go runWatchdog(watchdogCtx, client, h, &listenerBroken, watchdogInterval, watchdogGrace)
+	go runWatchdog(watchdogCtx, client, h, &listenerBroken, opts)
 	log.Printf("Health endpoint on %s/healthz (watchdog-grace=%s)\n", healthAddr, watchdogGrace)
-
-	// Accept connections until the listener is closed.
-	done := make(chan struct{})
-	go acceptLoop(listener, targetAddr, useProxyProto, &listenerBroken, done)
 
 	// Handle graceful shutdown
 	stop := make(chan os.Signal, 1)
@@ -181,7 +190,8 @@ func (h *health) downFor(now time.Time) (time.Duration, string) {
 //     be transient.
 //
 // Every condition here is about this peer's own machinery: nothing another
-// device does, or fails to do, can recycle this pod.
+// device does, or fails to do, can recycle this pod. The watchdog pairs this
+// with the self-probe, which tests the data path itself.
 func evaluateHealth(client *netbird.Client) (ok bool, terminal bool, reason string) {
 	if stopped, err := engineStopped(client); stopped {
 		return false, true, "NetBird engine stopped (" + err.Error() + ")"
@@ -197,6 +207,103 @@ func evaluateHealth(client *netbird.Client) (ok bool, terminal bool, reason stri
 	}
 
 	return true, false, "ok"
+}
+
+// watchdogOpts carries the watchdog's tunables, which are fixed for the life of
+// the process.
+type watchdogOpts struct {
+	interval   time.Duration
+	grace      time.Duration
+	listenPort string
+	selfProbe  bool
+}
+
+// selfProbeTimeout bounds a single self-probe dial. The netstack answers from
+// memory, so anything slower than this is already a wedge.
+const selfProbeTimeout = 5 * time.Second
+
+// verifySelfProbe reports whether the self-probe works at all here, retrying
+// until the timeout because the local address and the netstack both settle a
+// moment after the listener exists. A probe that never succeeds is switched off
+// rather than trusted, so a netstack that will not loop back to itself costs a
+// log line instead of an endless restart loop.
+func verifySelfProbe(client *netbird.Client, listenPort string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		last := errors.New("no local peer address yet")
+		if addr := selfProbeAddr(client, listenPort); addr != "" {
+			err := probeSelf(client, addr, selfProbeTimeout)
+			if err == nil {
+				log.Printf("Self-probe to %s verified", addr)
+				return true
+			}
+			last = err
+		}
+
+		if time.Now().After(deadline) {
+			log.Printf("Self-probe unavailable (%v); liveness will not use it", last)
+			return false
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// selfProbeAddr resolves this peer's own address on the NetBird network, or ""
+// when the engine cannot state it yet. It is re-resolved per probe so that an
+// address change is not papered over: the listener stays bound to the old
+// address, so the probe to the new one fails, which is the correct verdict.
+func selfProbeAddr(client *netbird.Client, listenPort string) string {
+	st, err := client.Status()
+	if err != nil {
+		return ""
+	}
+
+	ip := st.LocalPeerState.IP
+	if ip == "" {
+		return ""
+	}
+	if pfx, err := netip.ParsePrefix(ip); err == nil {
+		ip = pfx.Addr().String()
+	}
+
+	return net.JoinHostPort(ip, listenPort)
+}
+
+// probeSelf dials the proxy port over the NetBird network and expects to be
+// accepted.
+//
+// This is the health signal that needs no remote device to be awake, and it is a
+// direct test of the wedge this watchdog exists for. Dial resolves the engine's
+// current netstack, while the listener stays bound to the netstack it was
+// created on, so once the engine rebuilds its net the listener is orphaned: it
+// sits there accepting nothing while the live stack refuses clients on that
+// port. The probe is refused in exactly that state, and so is a listener that
+// has quietly closed, which today only ends the accept loop and is otherwise
+// unnoticed.
+func probeSelf(client *netbird.Client, addr string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	conn, err := client.Dial(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
+}
+
+// addrHost returns the address without its port.
+func addrHost(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	if tcp, ok := addr.(*net.TCPAddr); ok {
+		return tcp.IP.String()
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return ""
+	}
+	return host
 }
 
 // engineStopped reports whether the embedded NetBird engine is gone. Status()
@@ -229,8 +336,8 @@ func confirmEngineStopped(client *netbird.Client) bool {
 // what a manual pod delete does: a fresh NetBird registration and fresh peer
 // handshakes. Recreate is preferred over an in-process engine restart because
 // the listener is bound to the engine's net stack.
-func runWatchdog(ctx context.Context, client *netbird.Client, h *health, listenerBroken *atomic.Bool, interval, grace time.Duration) {
-	ticker := time.NewTicker(interval)
+func runWatchdog(ctx context.Context, client *netbird.Client, h *health, listenerBroken *atomic.Bool, opts watchdogOpts) {
+	ticker := time.NewTicker(opts.interval)
 	defer ticker.Stop()
 
 	for {
@@ -251,16 +358,26 @@ func runWatchdog(ctx context.Context, client *netbird.Client, h *health, listene
 				ok, reason = false, "accept loop persistently failing"
 			}
 
+			// Only probe an otherwise healthy peer: once something else is
+			// already wrong the probe adds noise, not information.
+			if ok && opts.selfProbe {
+				if addr := selfProbeAddr(client, opts.listenPort); addr != "" {
+					if err := probeSelf(client, addr, selfProbeTimeout); err != nil {
+						ok, reason = false, fmt.Sprintf("self-probe to %s failed: %v", addr, err)
+					}
+				}
+			}
+
 			now := time.Now()
 			h.set(ok, reason, now)
 
 			down, r := h.downFor(now)
 			switch {
-			case down >= grace:
+			case down >= opts.grace:
 				log.Printf("watchdog: unhealthy for %s (%s); exiting to trigger pod recreation", down.Round(time.Second), r)
 				os.Exit(1)
 			case !ok:
-				log.Printf("watchdog: unhealthy (%s); within grace %s", reason, grace)
+				log.Printf("watchdog: unhealthy (%s); within grace %s", reason, opts.grace)
 			}
 		}
 	}
@@ -293,7 +410,7 @@ func startHealthServer(addr string, h *health, grace time.Duration) *http.Server
 // acceptLoop accepts connections until the listener is closed. Unknown accept
 // errors are backed off (instead of a tight spin) and, if they persist, mark the
 // listener broken so the watchdog recycles the pod.
-func acceptLoop(listener net.Listener, targetAddr string, useProxyProto bool, listenerBroken *atomic.Bool, done chan struct{}) {
+func acceptLoop(listener net.Listener, targetAddr string, useProxyProto bool, selfIP string, listenerBroken *atomic.Bool, done chan struct{}) {
 	defer close(done)
 
 	const brokenThreshold = 10
@@ -324,6 +441,15 @@ func acceptLoop(listener net.Listener, targetAddr string, useProxyProto bool, li
 
 		consecutive = 0
 		listenerBroken.Store(false)
+
+		// The watchdog's self-probe arrives from this peer's own address, which
+		// no client can have. Accepting it is the whole test, so it never
+		// reaches the target.
+		if selfIP != "" && addrHost(conn.RemoteAddr()) == selfIP {
+			_ = conn.Close()
+			continue
+		}
+
 		go handleConnection(conn, targetAddr, useProxyProto)
 	}
 }

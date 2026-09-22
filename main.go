@@ -38,7 +38,6 @@ func main() {
 
 	// Robustness tunables (see README).
 	healthAddr := ":" + envDefault("HEALTH_LISTEN_PORT", "8081")
-	handshakeStale := envDuration("HEALTH_HANDSHAKE_STALE", 5*time.Minute)
 	watchdogInterval := envDuration("WATCHDOG_INTERVAL", 30*time.Second)
 	watchdogGrace := envDuration("WATCHDOG_GRACE", 3*time.Minute)
 
@@ -91,8 +90,8 @@ func main() {
 
 	watchdogCtx, watchdogCancel := context.WithCancel(context.Background())
 	healthSrv := startHealthServer(healthAddr, h, watchdogGrace)
-	go runWatchdog(watchdogCtx, client, h, &listenerBroken, watchdogInterval, watchdogGrace, handshakeStale)
-	log.Printf("Health endpoint on %s/healthz (handshake-stale=%s, watchdog-grace=%s)\n", healthAddr, handshakeStale, watchdogGrace)
+	go runWatchdog(watchdogCtx, client, h, &listenerBroken, watchdogInterval, watchdogGrace)
+	log.Printf("Health endpoint on %s/healthz (watchdog-grace=%s)\n", healthAddr, watchdogGrace)
 
 	// Accept connections until the listener is closed.
 	done := make(chan struct{})
@@ -177,13 +176,13 @@ func (h *health) downFor(now time.Time) (time.Duration, string) {
 //     deregistered -> PermissionDenied, connect.go returns backoff.Permanent),
 //     which clears the engine and it never comes back in-process. The watchdog
 //     exits straight away rather than waiting out the grace window.
-//   - ok=false (recoverable/degraded): management+signal both disconnected, or a
-//     connected peer with a stale WireGuard tunnel. Subject to the grace window,
-//     since these can be transient.
+//   - ok=false (recoverable/degraded): the status call errors, or management and
+//     signal are both disconnected. Subject to the grace window, since these can
+//     be transient.
 //
-// It flags unhealthy only for unambiguous failures, so an idle peer with no
-// clients is never flagged.
-func evaluateHealth(client *netbird.Client, handshakeStale time.Duration) (ok bool, terminal bool, reason string) {
+// Every condition here is about this peer's own machinery: nothing another
+// device does, or fails to do, can recycle this pod.
+func evaluateHealth(client *netbird.Client) (ok bool, terminal bool, reason string) {
 	if stopped, err := engineStopped(client); stopped {
 		return false, true, "NetBird engine stopped (" + err.Error() + ")"
 	}
@@ -195,25 +194,6 @@ func evaluateHealth(client *netbird.Client, handshakeStale time.Duration) (ok bo
 
 	if !st.ManagementState.Connected && !st.SignalState.Connected {
 		return false, false, "management and signal both disconnected"
-	}
-
-	if handshakeStale > 0 {
-		for _, p := range st.Peers {
-			if p.ConnStatus != netbird.PeerStatusConnected {
-				continue
-			}
-			if p.LastWireguardHandshake.IsZero() || time.Since(p.LastWireguardHandshake) > handshakeStale {
-				last := "never"
-				if !p.LastWireguardHandshake.IsZero() {
-					last = time.Since(p.LastWireguardHandshake).Round(time.Second).String() + " ago"
-				}
-				name := p.FQDN
-				if name == "" {
-					name = p.PubKey
-				}
-				return false, false, fmt.Sprintf("peer %s reported connected but last WireGuard handshake %s", name, last)
-			}
-		}
 	}
 
 	return true, false, "ok"
@@ -249,7 +229,7 @@ func confirmEngineStopped(client *netbird.Client) bool {
 // what a manual pod delete does: a fresh NetBird registration and fresh peer
 // handshakes. Recreate is preferred over an in-process engine restart because
 // the listener is bound to the engine's net stack.
-func runWatchdog(ctx context.Context, client *netbird.Client, h *health, listenerBroken *atomic.Bool, interval, grace, handshakeStale time.Duration) {
+func runWatchdog(ctx context.Context, client *netbird.Client, h *health, listenerBroken *atomic.Bool, interval, grace time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -258,7 +238,7 @@ func runWatchdog(ctx context.Context, client *netbird.Client, h *health, listene
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ok, terminal, reason := evaluateHealth(client, handshakeStale)
+			ok, terminal, reason := evaluateHealth(client)
 
 			// Terminal states will not recover in-process, so skip the grace
 			// window and exit as soon as a quick re-check confirms it.

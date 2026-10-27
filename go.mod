@@ -3,7 +3,7 @@ module netbird-forwarder
 go 1.26.0
 
 require (
-	github.com/netbirdio/netbird v0.79.0
+	github.com/netbirdio/netbird v0.81.5
 	github.com/pires/go-proxyproto v0.11.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 )
@@ -38,13 +38,14 @@ require (
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/gliderlabs/ssh v0.3.8 // indirect
+	github.com/gliderlabs/ssh v0.3.9-0.20250127223818-909fa952d4e4 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/nftables v0.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -56,7 +57,7 @@ require (
 	github.com/huin/goupnp v1.2.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/klauspost/compress v1.18.3 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/fs v0.1.0 // indirect
@@ -93,7 +94,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
-	github.com/quic-go/quic-go v0.62.0 // indirect
+	github.com/quic-go/quic-go v0.64.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.8 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 // indirect
@@ -116,7 +117,7 @@ require (
 	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
@@ -133,14 +134,14 @@ require (
 	howett.net/plist v1.0.2-0.20250314012144-ee69052608d9 // indirect
 )
 
-// Mirrors the replace set of netbirdio/netbird v0.79.0. A dependency's own
+// Mirrors the replace set of netbirdio/netbird v0.81.5. A dependency's own
 // replace directives are ignored, so they have to be restated here or the
 // client does not build.
 replace github.com/kardianos/service => github.com/netbirdio/service v0.0.0-20240911161631-f62744f42502
 
 replace github.com/getlantern/systray => github.com/netbirdio/systray v0.0.0-20231030152038-ef1ed2a27949
 
-replace golang.zx2c4.com/wireguard => github.com/netbirdio/wireguard-go v0.0.0-20260914123147-8bf8fa968f1a
+replace golang.zx2c4.com/wireguard => github.com/netbirdio/wireguard-go v0.0.0-20261008122457-d2b1ce9bfee9
 
 replace github.com/cloudflare/circl => codeberg.org/cunicu/circl v0.0.0-20230801113412-fec58fc7b5f6
 
@@ -152,4 +153,4 @@ replace github.com/dexidp/dex/api/v2 => github.com/netbirdio/dex/api/v2 v2.0.0-2
 
 replace github.com/mailru/easyjson => github.com/netbirdio/easyjson v0.9.0
 
-replace github.com/wailsapp/wails/v3 => github.com/netbirdio/wails/v3 v3.0.0-beta.3.0.20260902163841-4a71f7b1d9e1
+replace github.com/wailsapp/wails/v3 => github.com/netbirdio/wails/v3 v3.0.0-beta.3.0.20261009120932-4e087a8bfd6d

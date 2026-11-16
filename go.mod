@@ -6,6 +6,7 @@ require (
 	github.com/netbirdio/netbird v0.81.5
 	github.com/pires/go-proxyproto v0.11.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -129,7 +130,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gvisor.dev/gvisor v0.0.0-20260219192049-0f2374377e89 // indirect
 	howett.net/plist v1.0.2-0.20250314012144-ee69052608d9 // indirect
 )
@@ -154,3 +154,7 @@ replace github.com/dexidp/dex/api/v2 => github.com/netbirdio/dex/api/v2 v2.0.0-2
 replace github.com/mailru/easyjson => github.com/netbirdio/easyjson v0.9.0
 
 replace github.com/wailsapp/wails/v3 => github.com/netbirdio/wails/v3 v3.0.0-beta.3.0.20261009120932-4e087a8bfd6d
+
+// The routed dialer (embed.Options.EnableServerRoutes and RoutedDialer) is not
+// in a NetBird release yet. Drop this when it is.
+replace github.com/netbirdio/netbird => github.com/wouter0100/netbird v0.81.6-0.20261116113010-e94fb7022ead

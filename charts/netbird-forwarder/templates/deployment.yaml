@@ -1,0 +1,131 @@
+{{- include "netbird-forwarder.validate" . -}}
+{{- $fullname := include "netbird-forwarder.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "netbird-forwarder.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "netbird-forwarder.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if .Values.routes }}
+        checksum/routes: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if not .Values.netbird.setupKey.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "netbird-forwarder.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: {{ .Values.topologySpread.topologyKey }}
+          whenUnsatisfiable: {{ .Values.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "netbird-forwarder.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      containers:
+        - name: forwarder
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: NB_SETUP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "netbird-forwarder.setupKeySecret" . }}
+                  key: {{ ternary .Values.netbird.setupKey.existingSecretKey "setup-key" (not (empty .Values.netbird.setupKey.existingSecret)) }}
+            {{- with .Values.netbird.managementURL }}
+            - name: NB_MANAGEMENT_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.netbird.extraDnsLabels }}
+            - name: NB_EXTRA_DNS_LABELS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- if .Values.routes }}
+            - name: PROXY_ROUTES_FILE
+              value: /etc/netbird-forwarder/routes.yaml
+            {{- end }}
+            {{- if .Values.listener.port }}
+            - name: PROXY_LISTEN_PORT
+              value: {{ .Values.listener.port | quote }}
+            - name: PROXY_TARGET_ADDR
+              value: {{ .Values.listener.target | quote }}
+            - name: PROXY_USE_PROXY_PROTOCOL
+              value: {{ .Values.listener.proxyProtocol | quote }}
+            {{- end }}
+            - name: HEALTH_LISTEN_PORT
+              value: {{ .Values.health.port | quote }}
+            - name: WATCHDOG_INTERVAL
+              value: {{ .Values.health.watchdogInterval | quote }}
+            - name: WATCHDOG_GRACE
+              value: {{ .Values.health.watchdogGrace | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.health.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.routes }}
+            - name: routes
+              mountPath: /etc/netbird-forwarder
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+        {{- if .Values.routes }}
+        - name: routes
+          configMap:
+            name: {{ $fullname }}-routes
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

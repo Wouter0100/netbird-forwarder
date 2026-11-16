@@ -1,0 +1,11 @@
+{{- if .Values.routes }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "netbird-forwarder.fullname" . }}-routes
+  labels:
+    {{- include "netbird-forwarder.labels" . | nindent 4 }}
+data:
+  routes.yaml: |
+    {{- dict "routes" .Values.routes | toYaml | nindent 4 }}
+{{- end }}

@@ -27,7 +27,6 @@ RUN NETBIRD_VERSION="$(go list -m -f '{{.Version}}' github.com/netbirdio/netbird
 FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /app/netbird-forwarder .
+COPY --from=builder /app/netbird-forwarder /usr/local/bin/netbird-forwarder
 
-CMD ["./netbird-forwarder"]
+CMD ["/usr/local/bin/netbird-forwarder"]

@@ -1,0 +1,7 @@
+go.work
+go.work.sum
+e2e/
+charts/
+.idea/
+.claude/
+/netbird-forwarder

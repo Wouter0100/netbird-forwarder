@@ -1,0 +1,100 @@
+image:
+  repository: ghcr.io/wouter0100/netbird-forwarder
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Each replica is its own NetBird peer. With routes, all replicas serve all
+# VIPs and peers fail over between them.
+replicaCount: 2
+
+netbird:
+  # Leave empty for the NetBird default.
+  managementURL: ""
+  # Use a reusable, ephemeral setup key. With routes, give it an auto-group
+  # that the Network's router uses as peer_groups.
+  setupKey:
+    # Name of an existing Secret. Takes precedence over value.
+    existingSecret: ""
+    existingSecretKey: setup-key
+    # Creates a Secret when existingSecret is empty.
+    value: ""
+  # Extra DNS labels for each peer. The setup key must allow them.
+  extraDnsLabels: []
+
+# Virtual addresses: the forwarder acts as a routing peer for these VIPs.
+# Each entry: vip, port, target (host:port), proxyProtocol (optional).
+routes: []
+#  - vip: 10.250.0.10
+#    port: 5432
+#    target: postgres.db.svc.cluster.local:5432
+#  - vip: 10.250.0.11
+#    port: 443
+#    target: grafana.monitoring.svc.cluster.local:3000
+#    proxyProtocol: true
+
+# Single target on each peer's own NetBird address. Set both or neither.
+# Can be combined with routes.
+listener:
+  port: ""
+  target: ""
+  proxyProtocol: false
+
+health:
+  port: 8081
+  watchdogInterval: 30s
+  # /healthz fails only after the peer has been unhealthy this long.
+  watchdogGrace: 3m
+
+livenessProbe:
+  periodSeconds: 30
+  # The netstack can pause for a moment under memory pressure. A 1s timeout
+  # restarted healthy pods.
+  timeoutSeconds: 5
+  failureThreshold: 4
+
+# The pod's memory cgroup is charged for the page cache of the ~40 MB binary
+# on top of the Go heap. 64Mi made the kernel evict the program's own pages.
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+# On SIGTERM the forwarder deregisters its peer (up to 5s) and stops the
+# client (up to 5s), so peers switch to another replica at once.
+terminationGracePeriodSeconds: 30
+
+podDisruptionBudget:
+  # Created when replicaCount is above 1.
+  enabled: true
+  maxUnavailable: 1
+
+# Spread replicas over nodes when possible.
+topologySpread:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: ScheduleAnyway
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+extraEnv: []
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

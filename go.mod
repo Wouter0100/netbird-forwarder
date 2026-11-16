@@ -157,4 +157,4 @@ replace github.com/wailsapp/wails/v3 => github.com/netbirdio/wails/v3 v3.0.0-bet
 
 // The routed dialer (embed.Options.EnableServerRoutes and RoutedDialer) is not
 // in a NetBird release yet. Drop this when it is.
-replace github.com/netbirdio/netbird => github.com/wouter0100/netbird v0.81.6-0.20261116113010-e94fb7022ead
+replace github.com/netbirdio/netbird => github.com/wouter0100/netbird v0.0.0-20261116113010-e94fb7022ead

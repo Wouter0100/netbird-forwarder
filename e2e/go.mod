@@ -69,7 +69,7 @@ require (
 
 // Same fork as the forwarder: its e2e harness builds the management server and
 // the client from the source the forwarder is compiled against.
-replace github.com/netbirdio/netbird => github.com/wouter0100/netbird v0.81.6-0.20261116113010-e94fb7022ead
+replace github.com/netbirdio/netbird => github.com/wouter0100/netbird v0.0.0-20261116113010-e94fb7022ead
 
 // Mirrors the replace set of netbirdio/netbird v0.81.5. A dependency's own
 // replace directives are ignored, so they have to be restated here or the

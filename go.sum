@@ -333,8 +333,6 @@ github.com/netbirdio/ice/v4 v4.0.0-20250908184934-6202be846b51 h1:Ov4qdafATOgGMB
 github.com/netbirdio/ice/v4 v4.0.0-20250908184934-6202be846b51/go.mod h1:ZSIbPdBn5hePO8CpF1PekH2SfpTxg1PDhEwtbqZS7R8=
 github.com/netbirdio/management-integrations/integrations v0.0.0-20261006132740-6e6b0cb01f2e h1:SnDCreUnY+QDxKPueUoNrniMALCu2VFkXTCr/RIZjdg=
 github.com/netbirdio/management-integrations/integrations v0.0.0-20261006132740-6e6b0cb01f2e/go.mod h1:n47r67ZSPgwSmT/Z1o48JjZQW9YJ6m/6Bd/uAXkL3Pg=
-github.com/netbirdio/netbird v0.81.5 h1:Epa/vipDhnTnD2/aVJpptKVdtocYRwCRHZuJyz1EYro=
-github.com/netbirdio/netbird v0.81.5/go.mod h1:b+K8k/ZN6+IR+4Wd/dhQZR7qm62RC4ibpJubFv0RGNY=
 github.com/netbirdio/signal-dispatcher/dispatcher v0.0.0-20250805121659-6b4ac470ca45 h1:ujgviVYmx243Ksy7NdSwrdGPSRNE3pb8kEDSpH0QuAQ=
 github.com/netbirdio/signal-dispatcher/dispatcher v0.0.0-20250805121659-6b4ac470ca45/go.mod h1:5/sjFmLb8O96B5737VCqhHyGRzNFIaN/Bu7ZodXc3qQ=
 github.com/netbirdio/wireguard-go v0.0.0-20261008122457-d2b1ce9bfee9 h1:Mjt3tIBGa1/mJh1Xn8uZP30cd2VYd0NHANqTn+HBsaU=
@@ -478,6 +476,8 @@ github.com/vmihailenco/tagparser/v2 v2.0.0 h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAh
 github.com/vmihailenco/tagparser/v2 v2.0.0/go.mod h1:Wri+At7QHww0WTrCBeu4J6bNtoV6mEfg5OIWRZA9qds=
 github.com/wlynxg/anet v0.0.5 h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=
 github.com/wlynxg/anet v0.0.5/go.mod h1:eay5PRQr7fIVAMbTbchTnO9gG65Hg/uYGdc7mguHxoA=
+github.com/wouter0100/netbird v0.0.0-20261116113010-e94fb7022ead h1:Jrh+sOf/c1ZARLt4hkw9KaUJW4kFU2EiO6+NQx6rfBo=
+github.com/wouter0100/netbird v0.0.0-20261116113010-e94fb7022ead/go.mod h1:b+K8k/ZN6+IR+4Wd/dhQZR7qm62RC4ibpJubFv0RGNY=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=

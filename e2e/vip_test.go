@@ -2,7 +2,7 @@
 
 // Package e2e runs the forwarder in a kind cluster as an HA routing peer for two
 // virtual addresses, against a NetBird server and client from NetBird's e2e
-// harness. It needs docker, kind and kubectl on the PATH.
+// harness. It needs docker, kind, kubectl and helm on the PATH.
 //
 //	go test -tags e2e -v -timeout 40m ./e2e/
 //
@@ -101,8 +101,9 @@ func TestVirtualAddresses(t *testing.T) {
 	buildForwarderImage(t, ctx)
 	k.loadImage(ctx, fwdImage)
 	k.loadImage(ctx, agnhost)
-	k.apply(ctx, manifests(fwdKey))
-	k.run(ctx, "rollout", "status", "deployment/forwarder", "--timeout=180s")
+	k.apply(ctx, backend("backend-a")+"\n"+backend("backend-b"))
+	k.helmInstall(ctx, chartValues(fwdKey))
+	k.run(ctx, "rollout", "status", "deployment/netbird-forwarder", "--timeout=180s")
 	k.run(ctx, "rollout", "status", "deployment/backend-a", "deployment/backend-b", "--timeout=180s")
 
 	t.Log("starting the laptop client")
@@ -234,24 +235,14 @@ func laptopStatus(ctx context.Context, laptop *harness.Client) string {
 	return out
 }
 
+// buildForwarderImage builds the image from the repository's Dockerfile, the
+// same build that CI publishes.
 func buildForwarderImage(t *testing.T, ctx context.Context) {
 	t.Helper()
-	dir := t.TempDir()
 	root, err := filepath.Abs("..")
 	require.NoError(t, err)
-
-	// The version must start with the NetBird release: management gates
-	// firewall features on it.
-	build := exec.CommandContext(ctx, "go", "build", "-o", filepath.Join(dir, "netbird-forwarder"),
-		"-ldflags", "-s -w -X github.com/netbirdio/netbird/version.version=0.81.5+forwarder.e2e", ".")
-	build.Dir = root
-	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
-	out, err := build.CombinedOutput()
-	require.NoError(t, err, string(out))
-
-	dockerfile := "FROM alpine:3.24\nRUN apk add --no-cache ca-certificates\nCOPY netbird-forwarder /netbird-forwarder\nENTRYPOINT [\"/netbird-forwarder\"]\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644))
-	out, err = exec.CommandContext(ctx, "docker", "build", "-q", "-t", fwdImage, dir).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "docker", "build", "-q", "-t", fwdImage,
+		"--build-arg", "FORWARDER_VERSION=e2e", root).CombinedOutput()
 	require.NoError(t, err, string(out))
 }
 
@@ -348,8 +339,19 @@ func (k *kind) apply(ctx context.Context, manifest string) {
 	require.NoError(k.t, err, out)
 }
 
+func (k *kind) helmInstall(ctx context.Context, values string) {
+	k.t.Helper()
+	chart, err := filepath.Abs("../charts/netbird-forwarder")
+	require.NoError(k.t, err)
+	file := filepath.Join(k.t.TempDir(), "values.yaml")
+	require.NoError(k.t, os.WriteFile(file, []byte(values), 0o600))
+	out, err := exec.CommandContext(ctx, "helm", "install", "netbird-forwarder", chart,
+		"--kubeconfig", k.kubeconfig, "-f", file, "--wait", "--timeout", "180s").CombinedOutput()
+	require.NoError(k.t, err, string(out))
+}
+
 func (k *kind) forwarderPods(ctx context.Context) []string {
-	out := k.run(ctx, "get", "pods", "-l", "app=forwarder", "--field-selector=status.phase=Running", "-o", "jsonpath={.items[*].metadata.name}")
+	out := k.run(ctx, "get", "pods", "-l", "app.kubernetes.io/name=netbird-forwarder", "--field-selector=status.phase=Running", "-o", "jsonpath={.items[*].metadata.name}")
 	return strings.Fields(out)
 }
 
@@ -388,50 +390,18 @@ func (k *kind) activeForwarder(ctx context.Context, t *testing.T, traffic func()
 	return active[0]
 }
 
-func manifests(setupKey string) string {
+// chartValues configures the chart under test: two replicas serving both VIPs.
+func chartValues(setupKey string) string {
 	return fmt.Sprintf(`
-apiVersion: v1
-kind: Secret
-metadata: {name: forwarder}
-stringData: {setup-key: %q}
----
-apiVersion: v1
-kind: ConfigMap
-metadata: {name: forwarder-routes}
-data:
-  routes.yaml: |
-    routes:
-      - {vip: %s, port: 80, target: "backend-a:8080"}
-      - {vip: %s, port: 80, target: "backend-b:8080"}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: {name: forwarder}
-spec:
-  replicas: 2
-  selector: {matchLabels: {app: forwarder}}
-  template:
-    metadata: {labels: {app: forwarder}}
-    spec:
-      terminationGracePeriodSeconds: 15
-      containers:
-        - name: forwarder
-          image: %s
-          imagePullPolicy: Never
-          env:
-            - {name: NB_SETUP_KEY, valueFrom: {secretKeyRef: {name: forwarder, key: setup-key}}}
-            - {name: NB_MANAGEMENT_URL, value: %q}
-            - {name: PROXY_ROUTES_FILE, value: /etc/forwarder/routes.yaml}
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65534
-            allowPrivilegeEscalation: false
-            capabilities: {drop: [ALL]}
-          volumeMounts: [{name: routes, mountPath: /etc/forwarder}]
-      volumes: [{name: routes, configMap: {name: forwarder-routes}}]
-%s
-%s
-`, setupKey, vipA, vipB, fwdImage, managementURL, backend("backend-a"), backend("backend-b"))
+image: {repository: netbird-forwarder, tag: e2e, pullPolicy: Never}
+terminationGracePeriodSeconds: 15
+netbird:
+  managementURL: %q
+  setupKey: {value: %q}
+routes:
+  - {vip: %s, port: 80, target: "backend-a:8080"}
+  - {vip: %s, port: 80, target: "backend-b:8080"}
+`, managementURL, setupKey, vipA, vipB)
 }
 
 func backend(name string) string {

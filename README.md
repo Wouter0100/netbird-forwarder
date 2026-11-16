@@ -2,6 +2,10 @@
 
 A very simple forwarder implementing a feature like TS_DEST_IP in NetBird.
 
+## Deploy
+
+Use the Helm chart in [`charts/netbird-forwarder`](charts/netbird-forwarder/README.md).
+
 ## Environment Variables
 - `NB_SETUP_KEY`: NetBird Setup Key, should be reusable and ephemeral.
 - `NB_MANAGEMENT_URL`: NetBird management URL, if not the default.

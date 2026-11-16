@@ -26,8 +26,24 @@ import (
 func main() {
 	// Configuration from environment variables
 	setupKey := mustEnv("NB_SETUP_KEY")
-	listenPort := mustEnv("PROXY_LISTEN_PORT")
-	targetAddr := mustEnv("PROXY_TARGET_ADDR")
+	listenPort := os.Getenv("PROXY_LISTEN_PORT")
+	targetAddr := os.Getenv("PROXY_TARGET_ADDR")
+	routesFile := os.Getenv("PROXY_ROUTES_FILE")
+
+	if (listenPort == "") != (targetAddr == "") {
+		log.Fatal("PROXY_LISTEN_PORT and PROXY_TARGET_ADDR must be set together")
+	}
+	if listenPort == "" && routesFile == "" {
+		log.Fatal("Set PROXY_LISTEN_PORT and PROXY_TARGET_ADDR, PROXY_ROUTES_FILE, or both")
+	}
+
+	var routes routeTable
+	if routesFile != "" {
+		var err error
+		if routes, err = loadRoutes(routesFile); err != nil {
+			log.Fatalf("Failed to load routes: %v", err)
+		}
+	}
 
 	managementURL := os.Getenv("NB_MANAGEMENT_URL")
 	useProxyProto := os.Getenv("PROXY_USE_PROXY_PROTOCOL") == "true"
@@ -48,14 +64,22 @@ func main() {
 	}
 
 	// Initialize the embedded Netbird client
-	client, err := netbird.New(netbird.Options{
+	nbOpts := netbird.Options{
 		DeviceName:    hostname,
 		SetupKey:      setupKey,
 		ManagementURL: managementURL,
 		LogOutput:     os.Stdout,
 		DNSLabels:     dnsLabels,
 		LogLevel:      "info",
-	})
+	}
+	if routes != nil {
+		// Serve the route table as a routing peer. Client routes stay off: this
+		// peer only answers, it never reaches other networks itself.
+		nbOpts.EnableServerRoutes = true
+		nbOpts.DisableClientRoutes = true
+		nbOpts.RoutedDialer = routes.dial
+	}
+	client, err := netbird.New(nbOpts)
 	if err != nil {
 		log.Fatalf("Failed to create Netbird client: %v", err)
 	}
@@ -76,29 +100,39 @@ func main() {
 		log.Printf("Netbird not fully ready after startup: %v (continuing anyway)", err)
 	}
 
-	// Listen for incoming traffic on the Netbird network interface. Retry briefly
-	// because the userspace net stack can lag just behind Start returning.
-	listenStr := fmt.Sprintf(":%s", listenPort)
-	listener, err := listenWithRetry(client, listenStr, 15*time.Second)
-	if err != nil {
-		log.Fatalf("Failed to listen on Netbird network %s: %v", listenStr, err)
+	if routes != nil {
+		log.Printf("Serving %d routes as a routing peer\n", len(routes))
 	}
-	log.Printf("Listening on Netbird network port %s, forwarding to %s (Proxy Protocol: %v)\n", listenPort, targetAddr, useProxyProto)
 
 	// Shared health state, maintained by the watchdog and read by the HTTP probe.
 	var listenerBroken atomic.Bool
 	h := &health{healthy: true}
 
-	// Accept connections until the listener is closed. Started before the
-	// watchdog so that the self-probe below is served.
-	done := make(chan struct{})
-	go acceptLoop(listener, targetAddr, useProxyProto, addrHost(listener.Addr()), &listenerBroken, done)
-
 	opts := watchdogOpts{
 		interval:   watchdogInterval,
 		grace:      watchdogGrace,
 		listenPort: listenPort,
-		selfProbe:  verifySelfProbe(client, listenPort, 10*time.Second),
+	}
+
+	var listener net.Listener
+	done := make(chan struct{})
+	if listenPort == "" {
+		close(done)
+	} else {
+		// Listen for incoming traffic on the Netbird network interface. Retry
+		// briefly because the userspace net stack can lag just behind Start
+		// returning.
+		listenStr := fmt.Sprintf(":%s", listenPort)
+		listener, err = listenWithRetry(client, listenStr, 15*time.Second)
+		if err != nil {
+			log.Fatalf("Failed to listen on Netbird network %s: %v", listenStr, err)
+		}
+		log.Printf("Listening on Netbird network port %s, forwarding to %s (Proxy Protocol: %v)\n", listenPort, targetAddr, useProxyProto)
+
+		// Accept connections until the listener is closed. Started before the
+		// watchdog so that the self-probe below is served.
+		go acceptLoop(listener, targetAddr, useProxyProto, addrHost(listener.Addr()), &listenerBroken, done)
+		opts.selfProbe = verifySelfProbe(client, listenPort, 10*time.Second)
 	}
 
 	watchdogCtx, watchdogCancel := context.WithCancel(context.Background())
@@ -118,8 +152,10 @@ func main() {
 		log.Printf("Error closing health server: %v", err)
 	}
 
-	if err := listener.Close(); err != nil {
-		log.Printf("Error closing listener: %v", err)
+	if listener != nil {
+		if err := listener.Close(); err != nil {
+			log.Printf("Error closing listener: %v", err)
+		}
 	}
 
 	// Deregister from Management so the peer (and its DNS label + routes) is

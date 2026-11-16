@@ -9,6 +9,50 @@ A very simple forwarder implementing a feature like TS_DEST_IP in NetBird.
 - `PROXY_LISTEN_PORT`: Port to listen on in the NetBird network on the peer's IP.
 - `PROXY_TARGET_ADDR`: Target address to forward to, can be a hostname or IP. Should include a port.
 - `PROXY_USE_PROXY_PROTOCOL`: Whether to use the PROXY protocol.
+- `PROXY_ROUTES_FILE`: Path to a route table. The forwarder then acts as a routing
+  peer for virtual addresses (see below). `PROXY_LISTEN_PORT` and
+  `PROXY_TARGET_ADDR` become optional, but must be set together.
+
+### Virtual addresses (routing peer mode)
+
+With `PROXY_ROUTES_FILE`, the forwarder serves one or more virtual addresses
+(VIPs). Peers dial a VIP, NetBird routes it to one of the forwarder replicas, and
+the forwarder connects to the target of that VIP. All replicas serve all VIPs, so
+peers fail over to another replica when one stops.
+
+```yaml
+routes:
+  - vip: 10.250.0.10
+    port: 5432
+    target: postgres.db.svc.cluster.local:5432
+  - vip: 10.250.0.11
+    port: 443
+    target: grafana.monitoring.svc.cluster.local:3000
+    proxyProtocol: true
+```
+
+- The forwarder serves only the listed VIP and port pairs. It refuses all other
+  routed connections, whatever the NetBird policies allow.
+- `proxyProtocol` sends a PROXY protocol v1 header with the peer's NetBird
+  address as the source and the VIP as the destination.
+- The forwarder routes only TCP.
+- The forwarder does not need `NET_ADMIN`. The routed traffic stays in the
+  userspace network stack.
+
+Set up NetBird once per deployment:
+
+1. Give the setup key an auto-group, for example `forwarders`.
+2. Create a Network. Add each VIP as a resource (`/32`), each in its own group.
+3. Add a router to the Network with `peer_groups: [forwarders]` and masquerade on.
+4. Add one policy per VIP group, from the peers that need access.
+5. Optional: add a DNS record that points a name to each VIP.
+
+Use VIPs from a range that no site and no client uses. A change to the route
+table needs a restart. On SIGTERM the forwarder deregisters, so peers switch to
+another replica at once.
+
+This mode needs `embed.Options.EnableServerRoutes` and `RoutedDialer`, which are
+not in a NetBird release yet. `go.mod` replaces NetBird with a fork until they are.
 
 ### Health and self-healing
 The process exposes an HTTP liveness endpoint and runs an internal watchdog so a

@@ -52,3 +52,30 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  publish-chart:
+    name: Package and Push Helm Chart
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Log in to the chart registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "${REGISTRY}" --username "${{ github.actor }}" --password-stdin
+
+      # The chart version follows the release tag, so chart X deploys image vX.
+      # OCI repository names must be lowercase.
+      - name: Package and push the chart
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          helm package charts/netbird-forwarder --version "${version}" --app-version "${GITHUB_REF_NAME}" --destination dist
+          helm push "dist/netbird-forwarder-${version}.tgz" "oci://${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/charts"

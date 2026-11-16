@@ -2,7 +2,8 @@ apiVersion: v2
 name: netbird-forwarder
 description: Expose cluster services on a NetBird network through embedded NetBird peers
 type: application
-version: 0.1.0
+# CI sets version and appVersion from the release tag when it publishes.
+version: 0.0.8
 appVersion: "v0.0.8"
 home: https://github.com/Wouter0100/netbird-forwarder
 sources:

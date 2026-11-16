@@ -5,8 +5,11 @@ Deploys [netbird-forwarder](../../README.md). Each replica is a NetBird peer.
 ## Install
 
 ```shell
-helm install db-mesh ./charts/netbird-forwarder -n mesh --create-namespace -f values.yaml
+helm install db-mesh oci://ghcr.io/wouter0100/charts/netbird-forwarder --version 0.0.8 \
+  -n mesh --create-namespace -f values.yaml
 ```
+
+Each release tag `vX.Y.Z` publishes chart version `X.Y.Z`, which deploys image `vX.Y.Z`.
 
 ### Virtual addresses (routing peer mode)
 
